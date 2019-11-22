@@ -25,7 +25,32 @@ import os
 import re
 from subprocess import Popen, PIPE
 from ClusterShell.NodeSet import NodeSet
+import json
 
+def cache_request(cache_file):
+
+    def decorator(original_func):
+
+        try:
+            cache = json.load(open(cache_file, 'r'))
+        except (IOError, ValueError):
+            cache = {}
+
+        # cache format:
+        # date : timestamp
+        # data : hash {}
+
+        def new_func(param):
+            now = time.now()
+            if now-cache[date] > TTL :
+                cache[date] = time.now()
+                cache[data] = original_func(param)
+                json.dump(cache, open(file_name, 'w'))
+            return cache[data]
+
+        return new_func
+
+    return decorator
 
 class SlurmInterface(object):
     """ Provides methods to execute jobs with slurm scheduler """
@@ -130,3 +155,20 @@ class SlurmInterface(object):
                 job_info.append(job_info_temp)
 
         return job_info
+
+    @cache_request('/tmp/ubench_cache-$USER') # it could be stored in the home as well
+    def get_jobs_state(self, job_ids=[]):
+        """Return a hash with jobs status using a list of jobs ids"""
+
+        # two commands
+
+        # $ squeue -h -j -o "%.18i %.8T"
+        #    175757  RUNNING
+
+        # $ sacct -n --jobs=jobid1.0,jobid2.0 --format=JobId,State
+        # 26938.0     COMPLETED
+        # 26382.0     COMPLETED
+
+        # Possible states: CANCELLED COMPLETED PENDING RUNNING TIMEOUT
+
+        # { jobid : 'STATE' } => { 12441 : 'RUNNING', 12818 : 'COMPLETED' }
