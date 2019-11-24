@@ -23,9 +23,10 @@
 
 import os
 import re
+import json
 from subprocess import Popen, PIPE
 from ClusterShell.NodeSet import NodeSet
-import json
+
 
 def cache_request(cache_file):
 
@@ -156,7 +157,7 @@ class SlurmInterface(object):
 
         return job_info
 
-    @cache_request('/tmp/ubench_cache-$USER') # it could be stored in the home as well
+    #@cache_request('/tmp/ubench_cache-$USER') # it could be stored in the home as well
     def get_jobs_state(self, job_ids=[]):
         """Return a hash with jobs status using a list of jobs ids"""
 
@@ -172,3 +173,40 @@ class SlurmInterface(object):
         # Possible states: CANCELLED COMPLETED PENDING RUNNING TIMEOUT
 
         # { jobid : 'STATE' } => { 12441 : 'RUNNING', 12818 : 'COMPLETED' }
+
+        squeue_rex = re.compile(r'^\s+(\d+)\s+(\w+)')
+        sacct_rex = re.compile(r'^\s*(\d+)\.0\s+(\w+)')
+        squeue_cmd = "squeue -h -j {} -o \"%.18i %.8T\"".format(",".join(job_ids))
+        job_ids_0=[job_id+'.0' for job_id in job_ids]
+        sacct_cmd = "sacct -n --jobs={} --format=JobId,State".format(",".join(job_ids_0))
+
+        try_count = 0
+        while(True):
+            job_info = {}
+            
+            s_process = Popen(squeue_cmd, cwd=os.getcwd(), shell=True,
+                            stdout=PIPE, universal_newlines=True)
+            
+            for line in s_process.stdout:
+                groups = squeue_rex.match(line)
+                if groups:
+                    job_info[groups[1]]=groups[2]
+
+            s_process = Popen(sacct_cmd, cwd=os.getcwd(), shell=True,
+                            stdout=PIPE, universal_newlines=True)
+            for line in s_process.stdout:
+                groups = sacct_rex.match(line)
+                if groups:
+                    job_info[groups[1]]=groups[2]
+
+            # we garantee information for every job
+            if len(job_info)==len(job_ids) or try_count > 3:
+                break
+            else:
+                # do not loop forever 
+                try_count+=1
+            
+        return job_info
+            
+            
+            
