@@ -20,18 +20,20 @@
 
 # pylint: disable=unused-import,unused-variable,line-too-long,unused-argument
 from subprocess import Popen
+import os
+import time
+import json
 import pytest
 import mock
 import pytest_mock
 import ubench.scheduler_interfaces.slurm_interface as slurm_i
-import os
-
+import ubench.config
 class MockPopen(object):
     """ docstring """
 
-    def __init__(self,cmd):
+    def __init__(self, cmd):
         self.cmd = cmd
-        
+
     # pylint: disable=R0201
     def wait(self):
         """ docstring """
@@ -45,7 +47,7 @@ class MockPopen(object):
         elif self.cmd == "squeue":
             return ["   175757  RUNNING"]
         elif self.cmd == "sacct":
-            return [" 26938.0     COMPLETED"," 26382.0     COMPLETED"]
+            return [" 26938.0     COMPLETED", " 26382.0     COMPLETED"]
         else:
             return [""]
 
@@ -83,9 +85,10 @@ def test_job_status(mocker):
                               side_effect=mocksubpopen)
 
     interface = slurm_i.SlurmInterface()
-    assert interface.get_jobs_state(['111','222']) == {'175757' : 'RUNNING'}
+    assert interface.get_jobs_state(['111', '222']) == {'175757' : 'RUNNING'}
+    # time.sleep(10)
 
-def test_job_status_2(pytestconfig,mocker):
+def test_job_status_cache(pytestconfig, mocker):
     """ docstring """
     def mocksubpopen(args, shell, cwd, stdout=None, universal_newlines=False):
         """ docstring """
@@ -96,12 +99,53 @@ def test_job_status_2(pytestconfig,mocker):
                               side_effect=mocksubpopen)
 
     interface = slurm_i.SlurmInterface()
-    jobs_info = interface.get_jobs_state(['111','222'])
-    exp_cmd ='sacct -n --jobs=111.0,222.0 --format=JobId,State'
+    jobs_info = interface.get_jobs_state(['222'])
+    exp_cmd = 'sacct -n --jobs=111.0,222.0 --format=JobId,State'
     repository_root = os.path.join(pytestconfig.rootdir.dirname,
                                    pytestconfig.rootdir.basename)
 
-    mock_popen.assert_called_with(exp_cmd,cwd=repository_root,
-                                  shell=True, stdout=-1,universal_newlines=True)
+    # we used cached values no commmand is called
+    assert not mock_popen.called
+    # we load the cached results
+    assert jobs_info == {'175757' : 'RUNNING'}
+    # we assert if the cache file has been created
+    cache_file = '/tmp/ubench_cache-{}'.format(ubench.config.USER)
+    assert os.path.isfile(cache_file)
+    # # we invalidate cache
+    cache = {'date': time.time()-1000}
+    json.dump(cache, open(cache_file, 'w'))
+    jobs_info = interface.get_jobs_state(['111', '222'])
+    exp_cmd = 'sacct -n --jobs=111.0,222.0 --format=JobId,State'
+    repository_root = os.path.join(pytestconfig.rootdir.dirname,
+                                   pytestconfig.rootdir.basename)
+    # we dont use cache
+    mock_popen.assert_called_with(exp_cmd, cwd=repository_root,
+                                  shell=True, stdout=-1, universal_newlines=True)
 
-    assert jobs_info == {'26382': 'COMPLETED', '26938': 'COMPLETED'} 
+    assert jobs_info == {'26382': 'COMPLETED', '26938': 'COMPLETED'}
+
+
+
+
+
+
+# def test_job_status_cache(pytestconfig,mocker):
+#     """ docstring """
+#     def mocksubpopen(args, shell, cwd, stdout=None, universal_newlines=False):
+#         """ docstring """
+
+#         return MockPopen("sacct")
+
+#     mock_popen = mocker.patch("ubench.scheduler_interfaces.slurm_interface.Popen",
+#                               side_effect=mocksubpopen)
+
+#     interface = slurm_i.SlurmInterface()
+#     jobs_info = interface.get_jobs_state(['111','222'])
+#     exp_cmd ='sacct -n --jobs=111.0,222.0 --format=JobId,State'
+#     repository_root = os.path.join(pytestconfig.rootdir.dirname,
+#                                    pytestconfig.rootdir.basename)
+
+#     mock_popen.assert_called_with(exp_cmd,cwd=repository_root,
+#                                   shell=True, stdout=-1,universal_newlines=True)
+
+#     assert jobs_info == {'26382': 'COMPLETED', '26938': 'COMPLETED'}

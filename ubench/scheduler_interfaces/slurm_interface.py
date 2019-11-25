@@ -24,30 +24,46 @@
 import os
 import re
 import json
+import time
 from subprocess import Popen, PIPE
 from ClusterShell.NodeSet import NodeSet
+import ubench.config
 
+def memoize_disk(cache_file):
+    """Memoize to disk with TTL value"""
 
-def cache_request(cache_file):
+    user_c_file = "{}-{}".format(cache_file, ubench.config.USER)
 
     def decorator(original_func):
-
-        try:
-            cache = json.load(open(cache_file, 'r'))
-        except (IOError, ValueError):
-            cache = {}
-
+        """Decorator"""
         # cache format:
         # date : timestamp
         # data : hash {}
 
-        def new_func(param):
-            now = time.now()
-            if now-cache[date] > TTL :
-                cache[date] = time.now()
-                cache[data] = original_func(param)
-                json.dump(cache, open(file_name, 'w'))
-            return cache[data]
+        def new_func(cls, param):
+            """ Wrapper function"""
+            now = time.time()
+
+            try:
+                cache = json.load(open(user_c_file, 'r'))
+
+            except (IOError, ValueError):
+                cache = {}
+
+            no_cache = True
+
+            if 'date' in cache:
+                if now-cache['date'] < ubench.config.MEM_DISK_TTL:
+                    no_cache = False
+
+            if no_cache:
+                data = {}
+                data['date'] = time.time()
+                data['data'] = original_func(cls, param)
+                json.dump(data, open(user_c_file, 'w'))
+                return data['data']
+
+            return cache['data']
 
         return new_func
 
@@ -157,8 +173,8 @@ class SlurmInterface(object):
 
         return job_info
 
-    #@cache_request('/tmp/ubench_cache-$USER') # it could be stored in the home as well
-    def get_jobs_state(self, job_ids=[]):
+    @memoize_disk('/tmp/ubench_cache')
+    def get_jobs_state(self, job_ids=[]):#pylint: disable=dangerous-default-value
         """Return a hash with jobs status using a list of jobs ids"""
 
         # two commands
@@ -177,36 +193,34 @@ class SlurmInterface(object):
         squeue_rex = re.compile(r'^\s+(\d+)\s+(\w+)')
         sacct_rex = re.compile(r'^\s*(\d+)\.0\s+(\w+)')
         squeue_cmd = "squeue -h -j {} -o \"%.18i %.8T\"".format(",".join(job_ids))
-        job_ids_0=[job_id+'.0' for job_id in job_ids]
+        job_ids_0 = [job_id+'.0' for job_id in job_ids]
         sacct_cmd = "sacct -n --jobs={} --format=JobId,State".format(",".join(job_ids_0))
-
         try_count = 0
-        while(True):
+        while True:
             job_info = {}
-            
+
             s_process = Popen(squeue_cmd, cwd=os.getcwd(), shell=True,
-                            stdout=PIPE, universal_newlines=True)
-            
+                              stdout=PIPE, universal_newlines=True)
+
             for line in s_process.stdout:
-                groups = squeue_rex.match(line)
-                if groups:
-                    job_info[groups[1]]=groups[2]
+                match = squeue_rex.match(line)
+                if match:
+                    groups = match.groups()
+                    job_info[groups[0]] = groups[1]
 
             s_process = Popen(sacct_cmd, cwd=os.getcwd(), shell=True,
-                            stdout=PIPE, universal_newlines=True)
+                              stdout=PIPE, universal_newlines=True)
             for line in s_process.stdout:
-                groups = sacct_rex.match(line)
-                if groups:
-                    job_info[groups[1]]=groups[2]
+                match = sacct_rex.match(line)
+                if match:
+                    groups = match.groups()
+                    job_info[groups[0]] = groups[1]
 
             # we garantee information for every job
-            if len(job_info)==len(job_ids) or try_count > 3:
+            if len(job_info) == len(job_ids) or try_count > 3:
                 break
             else:
-                # do not loop forever 
-                try_count+=1
-            
+                # do not loop forever
+                try_count += 1
+
         return job_info
-            
-            
-            
