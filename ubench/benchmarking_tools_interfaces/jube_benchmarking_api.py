@@ -739,10 +739,10 @@ class JubeRun(object):
         self.jube_process.kill()
 
 
-    @staticmethod
-    def extract_job_ids(id_dir):
+    def extract_job_ids(self):
         """ Get jobs' ids from directory"""
         ## we have to get the id directory elsewhere
+        id_dir = self.result_path
         job_ids = []
         dir_exec_rex = re.compile(r'^\d{6}_execute$')
         job_id_rex = re.compile(r'^\w+\s\w+\s\w+\s(\d+)$')
